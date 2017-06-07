@@ -1,4 +1,4 @@
-%% Google Cloud Messaging for Ejabberd
+%% Ejabberd module for the Apple Push Notification Service
 %% Created: 07/09/2015 by mrDoctorWho
 %% License: MIT/X11
 
@@ -75,7 +75,7 @@ add_quotes(String) ->
 
 
 message(From, To, Packet) ->
-	Type = xml:get_tag_attr_s(<<"type">>, Packet),
+	Type = fxml:get_tag_attr_s(<<"type">>, Packet),
 	?DEBUG("Offline message", []),
 	case Type of 
 		"normal" -> ok;
@@ -85,7 +85,7 @@ message(From, To, Packet) ->
 			JTo = jlib:jid_to_string(To#jid{user = To#jid.user, server = To#jid.server, resource = <<"">>}),
 			ToUser = To#jid.user,
 			ToServer = To#jid.server,
-			Body = xml:get_path_s(Packet, [{elem, <<"body">>}, cdata]),
+			Body = fxml:get_path_s(Packet, [{elem, <<"body">>}, cdata]),
 
 			%% Checking subscription
 			{Subscription, _Groups} = 
@@ -119,10 +119,16 @@ iq(#jid{user = User, server = Server}, _, #iq{sub_el = SubEl} = IQ) ->
 	LUser = jlib:nodeprep(User),
 	LServer = jlib:nameprep(Server),
 
-	{MegaSecs, Secs, _MicroSecs} = erlang:timestamp(),
+	{MegaSecs, Secs, _MicroSecs} =
+    	try
+	    	erlang:timestamp()
+    	catch
+	    	error:undef ->
+	      		erlang:now()
+    	end,
 	TimeStamp = MegaSecs * 1000000 + Secs,
 
-	Token = xml:get_tag_cdata(xml:get_subtag(SubEl, <<"token">>)),
+	Token = fxml:get_tag_cdata(fxml:get_subtag(SubEl, <<"token">>)),
 
 	F = fun() -> mnesia:write(#apns_users{user={LUser, LServer}, token=Token, last_seen=TimeStamp}) end,
 
@@ -136,8 +142,8 @@ iq(#jid{user = User, server = Server}, _, #iq{sub_el = SubEl} = IQ) ->
 			mnesia:transaction(F),
 			?DEBUG("mod_apns: Updating last_seen for user ~s@~s", [LUser, LServer]);
 
-		%% Record for this key has been found, but for another key
-		[#apns_users{user={LUser, LServer}, token=Token}] ->
+		%% Record for this key has been found, but with another token
+		[#apns_users{user={LUser, LServer}, token=_}] ->
 			mnesia:transaction(F),
 			?DEBUG("mod_apns: Updating token for user ~s@~s", [LUser, LServer])
 		end,
